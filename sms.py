@@ -94,18 +94,14 @@ def process_results():
         csv_writer.writeheader()
 
     by_card, by_name = parse_phone_numbers()
-    for result in MOP.meos_results("192.168.88.190", 2009):
-        if (
-            result.card in sms_infos
-            and sms_infos[result.card].sms_status == "SmsStatus.sent"
-        ):
-            sms_info = sms_infos[result.card]
-            logging.info(
-                f"SMS to {result.card} already sent as SMS number {sms_info.sms_id}"
-            )
+    for result in MOP.results("192.168.88.190", 2009):
+        card = result.competitor.card
+        if card in sms_infos and sms_infos[card].sms_status == "sent":
+            sms_info = sms_infos[card]
+            logging.info(f"SMS to {card} already sent as SMS number {sms_info.sms_id}")
             continue
 
-        name = result.name
+        name = result.competitor.name
         text = ""
         match result.stat:
             case MOP.STAT_OK:
@@ -137,8 +133,8 @@ def process_results():
                 logging.info(f"{name} neštartoval")
 
         if text is not None and modem is not None:
-            if result.card in by_card:
-                number = by_card[result.card]
+            if card in by_card:
+                number = by_card[card]
             elif name in by_name:
                 number = by_name[name]
             else:
@@ -147,7 +143,7 @@ def process_results():
             try:
                 sms_path = modem_manager.create_sms(modem, number, text)
                 sms_info = SmsInfo(
-                    card=result.card,
+                    card=card,
                     name=name,
                     stat=result.stat,
                     sms_text=text,
@@ -165,7 +161,7 @@ def process_results():
                         "stat": sms_info.stat,
                         "sms_text": sms_info.sms_text,
                         "sms_id": sms_info.sms_id,
-                        "sms_status": sms_info.sms_status,  # TODO: convert to a shorter string
+                        "sms_status": sms_info.sms_status,
                     }
                 )
             except Exception as err:
