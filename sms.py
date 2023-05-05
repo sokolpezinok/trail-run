@@ -27,18 +27,23 @@ def parse_phone_numbers():
         for row in parsed_info:
             name = row["name"]
             phone_number = row["phone_number"]
-            try:
-                card = int(row["card"])
-                by_card[card] = phone_number
-            except Exception:
-                logging.error("Failed to parse card for {name}")
+            if phone_number == "":
+                continue
+            if row["card"]:
+                try:
+                    card = int(row["card"])
+                    by_card[card] = phone_number
+                except Exception:
+                    logging.error("Failed to parse card for {name}")
+            else:
+                logging.info(f"Card empty for {name}")
 
             if name in by_name and name not in duplicated_names:
-                logging.warn(f"Duplicate name {name}")
+                logging.warning(f"Duplicate name {name}")
                 duplicated_names.add(name)
                 del by_name[name]
             elif name in duplicated_names:
-                logging.warn(f"Duplicate name {name}")
+                logging.warning(f"Duplicate name {name}")
             else:
                 by_name[name] = phone_number
     return by_card, by_name
@@ -94,7 +99,7 @@ def process_results():
         csv_writer.writeheader()
 
     by_card, by_name = parse_phone_numbers()
-    for result in MOP.results("192.168.88.190", 2009):
+    for result in MOP.results("192.168.1.10", 2009):
         card = result.competitor.card
         if card in sms_infos and sms_infos[card].sms_status == "sent":
             sms_info = sms_infos[card]
@@ -102,14 +107,22 @@ def process_results():
             continue
 
         name = result.competitor.name
-        text = ""
+        if card in by_card:
+            number = by_card[card]
+        elif name in by_name:
+            number = by_name[name]
+        else:
+            logging.warning(f"Phone number of {name} unavailable")
+            continue
+
+        text = None
         match result.stat:
             case MOP.STAT_OK:
                 text = (
                     f"Gratulujeme, {name}! Dobehli ste v čase {result.time}. "
                     "Online výsledky z Behu mesta Pezinok nájdete na https://live.sokolpezinok.sk"
                 )
-                logging.info(text)
+                logging.info(f"{name} dobehol/la v čase {result.time}")
             case MOP.STAT_MP:
                 text = (
                     f"{name}, neprebehli ste celú trať. Kontaktujte rozhodcov Behu mesta Pezinok. "
@@ -133,13 +146,6 @@ def process_results():
                 logging.info(f"{name} neštartoval")
 
         if text is not None and modem is not None:
-            if card in by_card:
-                number = by_card[card]
-            elif name in by_name:
-                number = by_name[name]
-            else:
-                continue
-
             try:
                 sms_path = modem_manager.create_sms(modem, number, text)
                 sms_info = SmsInfo(
@@ -150,7 +156,9 @@ def process_results():
                     sms_id=None,  # last part of the handle
                     sms_status="created",
                 )
+                logging.info(f"Sending SMS to {name}")
                 modem_manager.send_sms(modem, sms_path)
+                logging.info("Sent SMS")
 
                 time.sleep(1.0)
                 sms_info.sms_status = modem_manager.sms_status(sms_path)
@@ -168,5 +176,4 @@ def process_results():
                 logging.error(err)
 
 
-parse_phone_numbers()
 process_results()
