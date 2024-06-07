@@ -100,8 +100,12 @@ async def process_results():
         csv_writer.writeheader()
 
     by_card, by_name = parse_phone_numbers()
-    # for result in MopClient.fetch_results("192.168.1.10", 2009):
-    for result in MopClient.results_from_file("meos.xml"):
+
+    mop = MopClient("api")
+    asyncio.create_task(mop.loop())
+    await asyncio.sleep(1.0)
+    # for result in MopClient.results_from_file("meos.xml"):
+    for result in await mop.fetch_results("192.168.100.23", 2009):
         card = result.competitor.card
         if card in sms_infos and sms_infos[card].sms_state == "5":
             sms_info = sms_infos[card]
