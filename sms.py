@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import asyncio
 import csv
 import logging
 import os
@@ -6,8 +7,8 @@ import sys
 import time
 from dataclasses import dataclass
 
-from yaroc.clients.mop import MOP
-from yaroc.utils.modem_manager import ModemManager
+from yaroc.clients.mop import MopClient
+from yaroc.utils.modem_manager import ModemManager, SmsState
 
 logging.basicConfig(
     encoding="utf-8",
@@ -56,7 +57,7 @@ class SmsInfo:
     stat: int | None
     sms_text: str
     sms_id: int | None
-    sms_status: str
+    sms_status: SmsState
 
 
 def parse_sms_info(
@@ -75,10 +76,10 @@ def parse_sms_info(
     )
 
 
-def process_results():
+async def process_results():
     csv_file = "/home/lukas/sms.csv"
-    modem_manager = ModemManager()
-    modems = modem_manager.get_modems()
+    modem_manager = await ModemManager.new()
+    modems = await modem_manager.get_modems()
     modem = None if len(modems) == 0 else modems[0]
     if len(modems) == 0:
         logging.warning("Could not find any modem, continuing without sending SMS")
@@ -99,7 +100,8 @@ def process_results():
         csv_writer.writeheader()
 
     by_card, by_name = parse_phone_numbers()
-    for result in MOP.results("192.168.1.10", 2009):
+    # for result in MopClient.fetch_results("192.168.1.10", 2009):
+    for result in MopClient.results_from_file("meos.xml"):
         card = result.competitor.card
         if card in sms_infos and sms_infos[card].sms_status == "sent":
             sms_info = sms_infos[card]
@@ -117,37 +119,38 @@ def process_results():
 
         text = None
         match result.stat:
-            case MOP.STAT_OK:
+            case MopClient.STAT_OK:
                 text = (
                     f"Gratulujeme, {name}! Dobehli ste v čase {result.time}. "
                     "Online výsledky z Behu mesta Pezinok nájdete na https://live.sokolpezinok.sk"
                 )
                 logging.info(f"{name} dobehol/la v čase {result.time}")
-            case MOP.STAT_MP:
+            case MopClient.STAT_MP:
                 text = (
                     f"{name}, neprebehli ste celú trať. Kontaktujte rozhodcov Behu mesta Pezinok. "
                     "Online výsledky z Behu mesta Pezinok nájdete na https://live.sokolpezinok.sk"
                 )
                 logging.info(f"{name} chýba prebeh")
-            case MOP.STAT_DNF:
+            case MopClient.STAT_DNF:
                 text = (
                     f"{name}, nezaznamenali sme prechod cieľom. Kontaktujte rozhodcov Behu mesta Pezinok. "
                     "Online výsledky z Behu mesta Pezinok nájdete na https://live.sokolpezinok.sk"
                 )
                 logging.info(f"{name} nedokončil(a)")
-            case MOP.STAT_OOC:
+            case MopClient.STAT_OOC:
                 text = None
                 logging.info(f"{name} bežal(a) mimo súťaže")
-            case MOP.STAT_DNS:
-                text = (
-                    f"{name}, boužiaľ ste neštartovali na Behu mesta Pezinok. "
-                    "Online výsledky z Behu mesta Pezinok nájdete na https://live.sokolpezinok.sk"
-                )
+            case MopClient.STAT_DNS:
+                text = None
+                # text = (
+                #     f"{name}, boužiaľ ste neštartovali na Behu mesta Pezinok. "
+                #     "Online výsledky z Behu mesta Pezinok nájdete na https://live.sokolpezinok.sk"
+                # )
                 logging.info(f"{name} neštartoval")
 
         if text is not None and modem is not None:
             try:
-                sms_path = modem_manager.create_sms(modem, number, text)
+                sms_path = await modem_manager.create_sms(modem, number, text)
                 sms_info = SmsInfo(
                     card=card,
                     name=name,
@@ -157,11 +160,11 @@ def process_results():
                     sms_status="created",
                 )
                 logging.info(f"Sending SMS to {name}")
-                modem_manager.send_sms(modem, sms_path)
+                await modem_manager.send_sms(sms_path)
                 logging.info("Sent SMS")
 
                 time.sleep(1.0)
-                sms_info.sms_status = modem_manager.sms_status(sms_path)
+                sms_info.sms_state = await modem_manager.sms_state(sms_path)
                 csv_writer.writerow(
                     {
                         "card": sms_info.card,
@@ -169,11 +172,11 @@ def process_results():
                         "stat": sms_info.stat,
                         "sms_text": sms_info.sms_text,
                         "sms_id": sms_info.sms_id,
-                        "sms_status": sms_info.sms_status,
+                        "sms_status": sms_info.sms_state,
                     }
                 )
             except Exception as err:
                 logging.error(err)
 
 
-process_results()
+asyncio.run(process_results())
