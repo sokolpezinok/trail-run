@@ -57,11 +57,11 @@ class SmsInfo:
     stat: int | None
     sms_text: str
     sms_id: int | None
-    sms_status: SmsState
+    sms_state: SmsState
 
 
 def parse_sms_info(
-    name: str, card: str, stat: str, sms_text: str, sms_id: str, sms_status: str
+    name: str, card: str, stat: str, sms_text: str, sms_id: str, sms_state: SmsState
 ):
     parsed_card = int(card)
     parsed_stat = int(stat)
@@ -72,7 +72,7 @@ def parse_sms_info(
         stat=parsed_stat,
         sms_text=sms_text,
         sms_id=parsed_sms_id,
-        sms_status=sms_status,
+        sms_state=sms_state,
     )
 
 
@@ -94,7 +94,7 @@ async def process_results():
     write_header = not os.path.isfile(csv_file)
 
     f = open(csv_file, "a")
-    fieldnames = ["card", "name", "stat", "sms_text", "sms_id", "sms_status"]
+    fieldnames = ["card", "name", "stat", "sms_text", "sms_id", "sms_state"]
     csv_writer = csv.DictWriter(f, fieldnames=fieldnames)
     if write_header:
         csv_writer.writeheader()
@@ -103,9 +103,9 @@ async def process_results():
     # for result in MopClient.fetch_results("192.168.1.10", 2009):
     for result in MopClient.results_from_file("meos.xml"):
         card = result.competitor.card
-        if card in sms_infos and sms_infos[card].sms_status == "sent":
+        if card in sms_infos and sms_infos[card].sms_state == "5":
             sms_info = sms_infos[card]
-            logging.info(f"SMS to {card} already sent as SMS number {sms_info.sms_id}")
+            logging.info(f"SMS to {card} already sent as SMS #{sms_info.sms_id}")
             continue
 
         name = result.competitor.name
@@ -151,13 +151,17 @@ async def process_results():
         if text is not None and modem is not None:
             try:
                 sms_path = await modem_manager.create_sms(modem, number, text)
+                if sms_path.startswith("/org/freedesktop/ModemManager1/SMS/"):
+                    sms_id = int(sms_path[35:])
+                else:
+                    sms_id = None
                 sms_info = SmsInfo(
                     card=card,
                     name=name,
                     stat=result.stat,
                     sms_text=text,
-                    sms_id=None,  # last part of the handle
-                    sms_status="created",
+                    sms_id=sms_id,
+                    sms_state=SmsState.Stored,
                 )
                 logging.info(f"Sending SMS to {name}")
                 await modem_manager.send_sms(sms_path)
@@ -172,7 +176,7 @@ async def process_results():
                         "stat": sms_info.stat,
                         "sms_text": sms_info.sms_text,
                         "sms_id": sms_info.sms_id,
-                        "sms_status": sms_info.sms_state,
+                        "sms_state": sms_info.sms_state,
                     }
                 )
             except Exception as err:
